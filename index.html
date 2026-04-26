@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Assembly Visualizer</title>
+    <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
+    <style>
+        body { margin: 0; background: #ffffff; font-family: sans-serif; overflow: hidden; }
+        model-viewer { 
+            width: 100vw; height: 100vh; display: block; 
+            background: radial-gradient(circle, #ffffff 0%, #f0f0f0 100%);
+        }
+        .ui-panel {
+            position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.95); padding: 25px; border-radius: 30px;
+            box-shadow: 0 15px 50px rgba(0,0,0,0.15); width: 300px; text-align: center; 
+            z-index: 1000; backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.3);
+        }
+        .slider { width: 100%; accent-color: #FF6B00; margin: 15px 0; cursor: pointer; }
+        .label { color: #FF6B00; font-weight: 800; font-size: 20px; margin-bottom: 5px; }
+    </style>
+</head>
+<body>
+
+    <model-viewer id="viewer" src="assembly.glb" ar ar-modes="webxr scene-viewer quick-look" 
+                  camera-controls 
+                  camera-orbit="auto auto 150%" 
+                  max-camera-orbit="auto auto 400%"
+                  min-camera-orbit="auto auto 5%"
+                  environment-image="legacy" exposure="1.2" 
+                  shadow-intensity="2" shadow-softness="0.5">
+        <div class="ui-panel">
+            <div class="label">STEP: <span id="stepDisplay">5</span> / 5</div>
+            <input type="range" min="1" max="5" value="5" class="slider" id="assemblySlider">
+        </div>
+    </model-viewer>
+
+    <script>
+        const viewer = document.getElementById('viewer');
+        const slider = document.getElementById('assemblySlider');
+        const stepDisplay = document.getElementById('stepDisplay');
+        
+        let cachedParts = []; 
+
+        function initPerformanceCaching() {
+            if (!viewer.model) return;
+            const symbols = Object.getOwnPropertySymbols(viewer.model);
+            const hierarchySymbol = symbols.find(s => s.toString().includes('hierarchy'));
+            const nodes = viewer.model[hierarchySymbol] || viewer.model.nodes || [];
+
+            cachedParts = nodes.filter(node => {
+                const name = node.name || "";
+                return name.toLowerCase().includes("part_");
+            }).map(node => {
+                const matches = node.name.match(/\d+/);
+                return {
+                    node: node,
+                    num: matches ? parseInt(matches[0]) : 0
+                };
+            });
+        }
+
+        function applyMaterialPolish() {
+            if (!viewer.model) return;
+            viewer.model.materials.forEach(mat => {
+                mat.pbrMetallicRoughness.setRoughnessFactor(0.4); 
+            });
+        }
+
+        function toggleDeep(node, isVisible) {
+            node.visible = isVisible;
+            if (node.mesh) node.mesh.visible = isVisible;
+            if (node.children) {
+                node.children.forEach(child => toggleDeep(child, isVisible));
+            }
+            if (node.scale) {
+                const s = isVisible ? 1 : 0;
+                node.scale.set(s, s, s);
+            }
+        }
+
+        function updateAssembly(step) {
+            stepDisplay.innerText = step;
+            cachedParts.forEach(item => {
+                const isVisible = (item.num === step);
+                toggleDeep(item.node, isVisible);
+            });
+            if (typeof viewer.queueRender === 'function') {
+                viewer.queueRender();
+            }
+        }
+
+        slider.addEventListener('input', (e) => {
+            updateAssembly(parseInt(e.target.value));
+        });
+
+        viewer.addEventListener('load', () => {
+            setTimeout(() => {
+                applyMaterialPolish();
+                initPerformanceCaching();
+                updateAssembly(5); 
+            }, 500);
+        });
+    </script>
+</body>
+</html>
