@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Assembly Visualizer</title>
+    <title>Dynamic Assembly Visualizer</title>
     <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
     <style>
         body { margin: 0; background: #ffffff; font-family: sans-serif; overflow: hidden; }
@@ -24,15 +24,11 @@
 <body>
 
     <model-viewer id="viewer" src="assembly.glb" ar ar-modes="webxr scene-viewer quick-look" 
-                  camera-controls 
-                  camera-orbit="auto auto 150%" 
-                  max-camera-orbit="auto auto 400%"
-                  min-camera-orbit="auto auto 5%"
-                  environment-image="legacy" exposure="1.2" 
+                  camera-controls environment-image="legacy" exposure="1.2" 
                   shadow-intensity="2" shadow-softness="0.5">
         <div class="ui-panel">
-            <div class="label">STEP: <span id="stepDisplay">5</span> / 5</div>
-            <input type="range" min="1" max="5" value="5" class="slider" id="assemblySlider">
+            <div class="label">STEP: <span id="stepDisplay">0</span> / <span id="totalSteps">0</span></div>
+            <input type="range" min="1" max="1" value="1" class="slider" id="assemblySlider">
         </div>
     </model-viewer>
 
@@ -40,18 +36,21 @@
         const viewer = document.getElementById('viewer');
         const slider = document.getElementById('assemblySlider');
         const stepDisplay = document.getElementById('stepDisplay');
+        const totalDisplay = document.getElementById('totalSteps');
         
         let cachedParts = []; 
 
-        function initPerformanceCaching() {
+        function initAutoConfiguration() {
             if (!viewer.model) return;
+            
             const symbols = Object.getOwnPropertySymbols(viewer.model);
             const hierarchySymbol = symbols.find(s => s.toString().includes('hierarchy'));
             const nodes = viewer.model[hierarchySymbol] || viewer.model.nodes || [];
 
+            // 1. Identify all nodes starting with "part" (case insensitive)
             cachedParts = nodes.filter(node => {
                 const name = node.name || "";
-                return name.toLowerCase().includes("part_");
+                return name.toLowerCase().startsWith("part");
             }).map(node => {
                 const matches = node.name.match(/\d+/);
                 return {
@@ -59,6 +58,18 @@
                     num: matches ? parseInt(matches[0]) : 0
                 };
             });
+
+            // 2. Find the highest part number in the file
+            if (cachedParts.length > 0) {
+                const maxStep = Math.max(...cachedParts.map(p => p.num));
+                
+                // 3. Automatically update the slider and UI
+                slider.max = maxStep;
+                slider.value = maxStep;
+                totalDisplay.innerText = maxStep;
+                
+                updateAssembly(maxStep);
+            }
         }
 
         function applyMaterialPolish() {
@@ -98,8 +109,7 @@
         viewer.addEventListener('load', () => {
             setTimeout(() => {
                 applyMaterialPolish();
-                initPerformanceCaching();
-                updateAssembly(5); 
+                initAutoConfiguration(); // This now handles everything automatically
             }, 500);
         });
     </script>
