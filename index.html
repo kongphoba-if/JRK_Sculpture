@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Assembly Visualizer Pro</title>
+    <title>JRK Sculpture Visualizer</title>
     <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
     <style>
         body { margin: 0; background: #ffffff; font-family: sans-serif; overflow: hidden; }
@@ -75,14 +75,13 @@
                 return {
                     node: n,
                     num: parseInt((name.match(/\d+/) || [0])[0]),
-                    isFinishedModePart: name.includes("_c") // Matches your Green panel naming
+                    isFinishedModePart: name.includes("_c") 
                 };
             });
 
             if (cachedNodes.length > 0) {
-                // Find max step based on Assembly parts (excluding _C parts)
                 const asmParts = cachedNodes.filter(p => !p.isFinishedModePart);
-                const maxStep = Math.max(...asmParts.map(p => p.num));
+                const maxStep = Math.max(...cachedNodes.map(p => p.num));
                 
                 slider.max = maxStep;
                 slider.value = maxStep;
@@ -95,7 +94,6 @@
             node.visible = isVisible;
             if (node.mesh) node.mesh.visible = isVisible;
             if (node.children) node.children.forEach(c => toggleDeep(c, isVisible));
-            // Setting scale to 0 ensures hidden parts don't cast ghost shadows
             if (node.scale) node.scale.set(isVisible ? 1 : 0, isVisible ? 1 : 0, isVisible ? 1 : 0);
         }
 
@@ -105,11 +103,11 @@
 
             cachedNodes.forEach(item => {
                 if (viewMode === 'assembly') {
-                    // Show ONLY the snapshot that matches the slider and ISN'T a _C part
-                    const shouldShow = !item.isFinishedModePart && item.num === currentStep;
+                    // FIX: Assembly mode now shows BOTH grey and color parts if they match the step
+                    const shouldShow = (item.num === currentStep);
                     toggleDeep(item.node, shouldShow);
                 } else {
-                    // Show ALL parts that have the _C suffix
+                    // FINISHED MODE: Show only the pieces with the _C suffix
                     toggleDeep(item.node, item.isFinishedModePart);
                 }
             });
@@ -120,23 +118,12 @@
             if (typeof viewer.queueRender === 'function') viewer.queueRender();
         }
 
-        btnAsm.onclick = () => { 
-            viewMode = 'assembly'; 
-            btnAsm.classList.add('active'); 
-            btnFull.classList.remove('active'); 
-            updateView(); 
-        };
-        btnFull.onclick = () => { 
-            viewMode = 'full'; 
-            btnFull.classList.add('active'); 
-            btnAsm.classList.remove('active'); 
-            updateView(); 
-        };
+        btnAsm.onclick = () => { viewMode = 'assembly'; btnAsm.classList.add('active'); btnFull.classList.remove('active'); updateView(); };
+        btnFull.onclick = () => { viewMode = 'full'; btnFull.classList.add('active'); btnAsm.classList.remove('active'); updateView(); };
         slider.oninput = () => updateView();
 
         viewer.addEventListener('load', () => {
             setTimeout(() => {
-                // Apply our "Visual Polish" to all materials
                 viewer.model.materials.forEach(m => m.pbrMetallicRoughness.setRoughnessFactor(0.4));
                 initNodes();
             }, 500);
