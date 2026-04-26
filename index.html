@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Dynamic Assembly Visualizer</title>
+    <title>Assembly Visualizer Pro</title>
     <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
     <style>
         body { margin: 0; background: #ffffff; font-family: sans-serif; overflow: hidden; }
@@ -14,21 +14,39 @@
         .ui-panel {
             position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
             background: rgba(255, 255, 255, 0.95); padding: 25px; border-radius: 30px;
-            box-shadow: 0 15px 50px rgba(0,0,0,0.15); width: 300px; text-align: center; 
+            box-shadow: 0 15px 50px rgba(0,0,0,0.15); width: 320px; text-align: center; 
             z-index: 1000; backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.3);
         }
         .slider { width: 100%; accent-color: #FF6B00; margin: 15px 0; cursor: pointer; }
         .label { color: #FF6B00; font-weight: 800; font-size: 20px; margin-bottom: 5px; }
+        
+        .button-group { display: flex; gap: 10px; margin-top: 10px; justify-content: center; }
+        .mode-btn {
+            background: #eee; border: none; padding: 8px 15px; border-radius: 15px;
+            font-size: 11px; font-weight: 700; cursor: pointer; color: #666; transition: 0.3s;
+        }
+        .mode-btn.active { background: #FF6B00; color: white; }
     </style>
 </head>
 <body>
 
     <model-viewer id="viewer" src="assembly.glb" ar ar-modes="webxr scene-viewer quick-look" 
-                  camera-controls environment-image="legacy" exposure="1.2" 
-                  shadow-intensity="2" shadow-softness="0.5">
+                  camera-controls camera-orbit="auto auto 150%" max-camera-orbit="auto auto 400%"
+                  environment-image="legacy" exposure="1.2" shadow-intensity="2" shadow-softness="0.5">
         <div class="ui-panel">
-            <div class="label">STEP: <span id="stepDisplay">0</span> / <span id="totalSteps">0</span></div>
-            <input type="range" min="1" max="1" value="1" class="slider" id="assemblySlider">
+            <div id="controls-assembly">
+                <div class="label">STEP: <span id="stepDisplay">0</span> / <span id="totalSteps">0</span></div>
+                <input type="range" min="1" max="1" value="1" class="slider" id="assemblySlider">
+            </div>
+            <div id="controls-finished" style="display:none;">
+                <div class="label">FINISHED SCULPTURE</div>
+                <p style="font-size:11px; color:#888; margin: 5px 0 10px 0;">Displaying all components in full color.</p>
+            </div>
+            
+            <div class="button-group">
+                <button id="btn-asm" class="mode-btn active">ASSEMBLY MODE</button>
+                <button id="btn-full" class="mode-btn">FINISHED MODE</button>
+            </div>
         </div>
     </model-viewer>
 
@@ -37,79 +55,90 @@
         const slider = document.getElementById('assemblySlider');
         const stepDisplay = document.getElementById('stepDisplay');
         const totalDisplay = document.getElementById('totalSteps');
+        const btnAsm = document.getElementById('btn-asm');
+        const btnFull = document.getElementById('btn-full');
         
-        let cachedParts = []; 
+        let cachedNodes = [];
+        let viewMode = 'assembly'; 
 
-        function initAutoConfiguration() {
+        function initNodes() {
             if (!viewer.model) return;
-            
             const symbols = Object.getOwnPropertySymbols(viewer.model);
-            const hierarchySymbol = symbols.find(s => s.toString().includes('hierarchy'));
-            const nodes = viewer.model[hierarchySymbol] || viewer.model.nodes || [];
+            const hSym = symbols.find(s => s.toString().includes('hierarchy'));
+            const allNodes = viewer.model[hSym] || viewer.model.nodes || [];
 
-            // 1. Identify all nodes starting with "part" (case insensitive)
-            cachedParts = nodes.filter(node => {
-                const name = node.name || "";
-                return name.toLowerCase().startsWith("part");
-            }).map(node => {
-                const matches = node.name.match(/\d+/);
+            cachedNodes = allNodes.filter(n => {
+                const name = (n.name || "").toLowerCase();
+                return name.startsWith("part");
+            }).map(n => {
+                const name = n.name.toLowerCase();
                 return {
-                    node: node,
-                    num: matches ? parseInt(matches[0]) : 0
+                    node: n,
+                    num: parseInt((name.match(/\d+/) || [0])[0]),
+                    isFinishedModePart: name.includes("_c") // Matches your Green panel naming
                 };
             });
 
-            // 2. Find the highest part number in the file
-            if (cachedParts.length > 0) {
-                const maxStep = Math.max(...cachedParts.map(p => p.num));
+            if (cachedNodes.length > 0) {
+                // Find max step based on Assembly parts (excluding _C parts)
+                const asmParts = cachedNodes.filter(p => !p.isFinishedModePart);
+                const maxStep = Math.max(...asmParts.map(p => p.num));
                 
-                // 3. Automatically update the slider and UI
                 slider.max = maxStep;
                 slider.value = maxStep;
                 totalDisplay.innerText = maxStep;
-                
-                updateAssembly(maxStep);
+                updateView();
             }
-        }
-
-        function applyMaterialPolish() {
-            if (!viewer.model) return;
-            viewer.model.materials.forEach(mat => {
-                mat.pbrMetallicRoughness.setRoughnessFactor(0.4); 
-            });
         }
 
         function toggleDeep(node, isVisible) {
             node.visible = isVisible;
             if (node.mesh) node.mesh.visible = isVisible;
-            if (node.children) {
-                node.children.forEach(child => toggleDeep(child, isVisible));
-            }
-            if (node.scale) {
-                const s = isVisible ? 1 : 0;
-                node.scale.set(s, s, s);
-            }
+            if (node.children) node.children.forEach(c => toggleDeep(c, isVisible));
+            // Setting scale to 0 ensures hidden parts don't cast ghost shadows
+            if (node.scale) node.scale.set(isVisible ? 1 : 0, isVisible ? 1 : 0, isVisible ? 1 : 0);
         }
 
-        function updateAssembly(step) {
-            stepDisplay.innerText = step;
-            cachedParts.forEach(item => {
-                const isVisible = (item.num === step);
-                toggleDeep(item.node, isVisible);
+        function updateView() {
+            const currentStep = parseInt(slider.value);
+            stepDisplay.innerText = currentStep;
+
+            cachedNodes.forEach(item => {
+                if (viewMode === 'assembly') {
+                    // Show ONLY the snapshot that matches the slider and ISN'T a _C part
+                    const shouldShow = !item.isFinishedModePart && item.num === currentStep;
+                    toggleDeep(item.node, shouldShow);
+                } else {
+                    // Show ALL parts that have the _C suffix
+                    toggleDeep(item.node, item.isFinishedModePart);
+                }
             });
-            if (typeof viewer.queueRender === 'function') {
-                viewer.queueRender();
-            }
+
+            document.getElementById('controls-assembly').style.display = (viewMode === 'assembly') ? 'block' : 'none';
+            document.getElementById('controls-finished').style.display = (viewMode === 'assembly') ? 'none' : 'block';
+
+            if (typeof viewer.queueRender === 'function') viewer.queueRender();
         }
 
-        slider.addEventListener('input', (e) => {
-            updateAssembly(parseInt(e.target.value));
-        });
+        btnAsm.onclick = () => { 
+            viewMode = 'assembly'; 
+            btnAsm.classList.add('active'); 
+            btnFull.classList.remove('active'); 
+            updateView(); 
+        };
+        btnFull.onclick = () => { 
+            viewMode = 'full'; 
+            btnFull.classList.add('active'); 
+            btnAsm.classList.remove('active'); 
+            updateView(); 
+        };
+        slider.oninput = () => updateView();
 
         viewer.addEventListener('load', () => {
             setTimeout(() => {
-                applyMaterialPolish();
-                initAutoConfiguration(); // This now handles everything automatically
+                // Apply our "Visual Polish" to all materials
+                viewer.model.materials.forEach(m => m.pbrMetallicRoughness.setRoughnessFactor(0.4));
+                initNodes();
             }, 500);
         });
     </script>
